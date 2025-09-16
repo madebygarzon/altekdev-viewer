@@ -1,56 +1,563 @@
 <!-- Comments in English inside code as requested. -->
 <!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>ALTEKDev Viewer</title></head>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ALTEKDev Cotizaciones</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    >
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        background-color: var(--bs-body-bg);
+        min-height: 100vh;
+      }
+      .table-responsive {
+        max-height: 420px;
+      }
+    </style>
+  </head>
   <body>
-    <h1>ALTEKDev Viewer</h1>
-    <button id="ping">Ping</button>
-    <button id="tables">Tables</button>
-    <input id="q" placeholder="Search SKU...">
-    <button id="items">inv_items</button>
+    <div id="root"></div>
+    <script type="module">
+      import React, { useEffect, useMemo, useState } from "https://esm.sh/react@18.2.0";
+      import { createRoot } from "https://esm.sh/react-dom@18.2.0/client";
 
-    <h3>Insert test</h3>
-    <form id="ins">
-      <input name="cotizacionweb" type="number" placeholder="idcotizacionweb" required>
-      <input name="cliente" placeholder="cliente" required>
-      <input name="telefono" placeholder="telefono">
-      <input name="email" type="email" placeholder="email" required>
-      <input name="sku" placeholder="SKU exacto" required>
-      <input name="nombre" placeholder="Nombre item" required>
-      <input name="cantidad" type="number" value="1" min="1" required>
-      <input name="precio" type="number" step="0.01" placeholder="Precio" required>
-      <input name="descuento" type="number" min="0" max="100" value="0">
-      <button type="submit">Probar inserción</button>
-    </form>
+      const API_BASE = window.__ALTEK_API_BASE ?? "/api";
 
-    <pre id="out"></pre>
+      const formatCurrency = (value) =>
+        new Intl.NumberFormat("es-CO", {
+          style: "currency",
+          currency: "COP",
+          maximumFractionDigits: 0
+        }).format(value);
 
-    <script>
-      const API = "http://localhost:8080/api";
-      const out = document.getElementById("out");
+      const formatNumber = (value) =>
+        new Intl.NumberFormat("es-CO", { maximumFractionDigits: 2 }).format(value);
 
-      document.getElementById("ping").onclick = async () => {
-        out.textContent = JSON.stringify(await (await fetch(`${API}/ping`)).json(), null, 2);
+      const formatDate = (value) => {
+        if (!value) return "";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+        return date.toLocaleDateString("es-CO", {
+          year: "numeric",
+          month: "short",
+          day: "2-digit"
+        });
       };
-      document.getElementById("tables").onclick = async () => {
-        out.textContent = JSON.stringify(await (await fetch(`${API}/tables`)).json(), null, 2);
+
+      const fetchJson = async (url, options = {}) => {
+        const response = await fetch(url, options);
+        let payload = null;
+        const text = await response.text();
+        if (text) {
+          try {
+            payload = JSON.parse(text);
+          } catch (error) {
+            throw new Error("La respuesta del servidor no es JSON válido");
+          }
+        }
+        if (!response.ok) {
+          const message = payload?.error ?? payload?.message ?? `Error ${response.status}`;
+          throw new Error(message);
+        }
+        return payload ?? {};
       };
-      document.getElementById("items").onclick = async () => {
-        const q = document.getElementById("q").value;
-        const url = q ? `${API}/inv-items?search=${encodeURIComponent(q)}` : `${API}/inv-items`;
-        out.textContent = JSON.stringify(await (await fetch(url)).json(), null, 2);
+
+      const Pagination = ({ pagination, onChange }) => {
+        if (!pagination) return null;
+        const { page, totalPages } = pagination;
+        const canPrev = page > 1;
+        const canNext = page < totalPages;
+        return (
+          React.createElement("div", { className: "d-flex align-items-center gap-2" },
+            React.createElement("button", {
+              type: "button",
+              className: "btn btn-outline-secondary btn-sm",
+              disabled: !canPrev,
+              onClick: () => canPrev && onChange(page - 1)
+            }, "Anterior"),
+            React.createElement("span", { className: "small text-body-secondary" },
+              `Página ${page} de ${totalPages}`
+            ),
+            React.createElement("button", {
+              type: "button",
+              className: "btn btn-outline-secondary btn-sm",
+              disabled: !canNext,
+              onClick: () => canNext && onChange(page + 1)
+            }, "Siguiente")
+          )
+        );
       };
-      document.getElementById("ins").onsubmit = async (e) => {
-        e.preventDefault();
-        const form = new FormData(e.target);
-        const body = Object.fromEntries(form.entries());
-        body.cantidad = Number(body.cantidad);
-        body.precio = Number(body.precio);
-        body.descuento = Number(body.descuento);
-        body.cotizacionweb = Number(body.cotizacionweb);
-        const r = await fetch(`${API}/test-insert`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
-        out.textContent = JSON.stringify(await r.json(), null, 2);
+
+      const PageSizeSelector = ({ value, onChange }) => (
+        React.createElement("select", {
+          className: "form-select form-select-sm w-auto",
+          value,
+          onChange: (event) => onChange(Number(event.target.value))
+        },
+          React.createElement("option", { value: 10 }, "10"),
+          React.createElement("option", { value: 20 }, "20"),
+          React.createElement("option", { value: 50 }, "50")
+        )
+      );
+
+      const SkuSearch = () => {
+        const [query, setQuery] = useState("");
+        const [submittedQuery, setSubmittedQuery] = useState("");
+        const [page, setPage] = useState(1);
+        const [pageSize, setPageSize] = useState(20);
+        const [items, setItems] = useState([]);
+        const [pagination, setPagination] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState("");
+
+        useEffect(() => {
+          const controller = new AbortController();
+          const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize)
+          });
+          if (submittedQuery) {
+            params.set("search", submittedQuery);
+          }
+          setLoading(true);
+          setError("");
+          fetchJson(`${API_BASE}/skus?${params.toString()}`, { signal: controller.signal })
+            .then((data) => {
+              setItems(data.data ?? []);
+              setPagination(data.pagination ?? null);
+            })
+            .catch((err) => {
+              if (err.name === "AbortError") return;
+              setError(err.message ?? "Error inesperado");
+            })
+            .finally(() => {
+              setLoading(false);
+            });
+          return () => controller.abort();
+        }, [submittedQuery, page, pageSize]);
+
+        const onSubmit = (event) => {
+          event.preventDefault();
+          setPage(1);
+          setSubmittedQuery(query.trim());
+        };
+
+        const onPageChange = (newPage) => {
+          setPage(newPage);
+        };
+
+        const onPageSizeChange = (value) => {
+          setPage(1);
+          setPageSize(value);
+        };
+
+        return (
+          React.createElement("section", { className: "card shadow-sm" },
+            React.createElement("div", { className: "card-body" },
+              React.createElement("div", { className: "d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3" },
+                React.createElement("div", null,
+                  React.createElement("h2", { className: "h5 mb-0" }, "Buscar SKUs"),
+                  React.createElement("p", { className: "text-body-secondary small mb-0" }, "Consulta productos por código SKU." )
+                ),
+                React.createElement("div", { className: "d-flex align-items-center gap-2" },
+                  React.createElement("label", { className: "small text-body-secondary" }, "Filas:"),
+                  React.createElement(PageSizeSelector, { value: pageSize, onChange: onPageSizeChange })
+                )
+              ),
+              React.createElement("form", { className: "row g-2 mb-3", onSubmit },
+                React.createElement("div", { className: "col-12 col-sm-8" },
+                  React.createElement("input", {
+                    type: "text",
+                    className: "form-control",
+                    placeholder: "Ingresa parte del SKU...",
+                    value: query,
+                    onChange: (event) => setQuery(event.target.value)
+                  })
+                ),
+                React.createElement("div", { className: "col-12 col-sm" },
+                  React.createElement("button", { type: "submit", className: "btn btn-primary w-100" }, "Buscar")
+                )
+              ),
+              error && React.createElement("div", { className: "alert alert-danger" }, error),
+              React.createElement("div", { className: "table-responsive border rounded" },
+                React.createElement("table", { className: "table table-sm table-hover align-middle mb-0" },
+                  React.createElement("thead", { className: "table-light" },
+                    React.createElement("tr", null,
+                      React.createElement("th", { scope: "col" }, "SKU")
+                    )
+                  ),
+                  React.createElement("tbody", null,
+                    loading ? (
+                      React.createElement("tr", null,
+                        React.createElement("td", { className: "text-center" }, "Cargando...")
+                      )
+                    ) : items.length === 0 ? (
+                      React.createElement("tr", null,
+                        React.createElement("td", { className: "text-center text-body-secondary" }, "Sin resultados")
+                      )
+                    ) : (
+                      items.map((item) => (
+                        React.createElement("tr", { key: item.item },
+                          React.createElement("td", null, item.item)
+                        )
+                      ))
+                    )
+                  )
+                )
+              ),
+              React.createElement("div", { className: "d-flex justify-content-between align-items-center mt-3" },
+                React.createElement("div", { className: "small text-body-secondary" },
+                  pagination?.total ? `${pagination.total} resultados` : ""
+                ),
+                React.createElement(Pagination, { pagination, onChange: onPageChange })
+              )
+            )
+          )
+        );
       };
+
+      const CotizacionesList = ({ onSelect, selectedId }) => {
+        const [query, setQuery] = useState("");
+        const [submittedQuery, setSubmittedQuery] = useState("");
+        const [page, setPage] = useState(1);
+        const [pageSize, setPageSize] = useState(20);
+        const [rows, setRows] = useState([]);
+        const [pagination, setPagination] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState("");
+
+        useEffect(() => {
+          const controller = new AbortController();
+          const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize)
+          });
+          if (submittedQuery) {
+            params.set("search", submittedQuery);
+          }
+          setLoading(true);
+          setError("");
+          fetchJson(`${API_BASE}/cotizaciones?${params.toString()}`, { signal: controller.signal })
+            .then((data) => {
+              setRows(data.data ?? []);
+              setPagination(data.pagination ?? null);
+            })
+            .catch((err) => {
+              if (err.name === "AbortError") return;
+              setError(err.message ?? "Error inesperado");
+            })
+            .finally(() => {
+              setLoading(false);
+            });
+          return () => controller.abort();
+        }, [submittedQuery, page, pageSize]);
+
+        const onSubmit = (event) => {
+          event.preventDefault();
+          setPage(1);
+          setSubmittedQuery(query.trim());
+        };
+
+        const onPageChange = (newPage) => setPage(newPage);
+        const onPageSizeChange = (value) => {
+          setPage(1);
+          setPageSize(value);
+        };
+
+        return (
+          React.createElement("section", { className: "card shadow-sm h-100" },
+            React.createElement("div", { className: "card-body d-flex flex-column" },
+              React.createElement("div", { className: "d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3" },
+                React.createElement("div", null,
+                  React.createElement("h2", { className: "h5 mb-0" }, "Cotizaciones"),
+                  React.createElement("p", { className: "text-body-secondary small mb-0" }, "Selecciona una cotización para ver el detalle.")
+                ),
+                React.createElement("div", { className: "d-flex align-items-center gap-2" },
+                  React.createElement("label", { className: "small text-body-secondary" }, "Filas:"),
+                  React.createElement(PageSizeSelector, { value: pageSize, onChange: onPageSizeChange })
+                )
+              ),
+              React.createElement("form", { className: "row g-2 mb-3", onSubmit },
+                React.createElement("div", { className: "col-12 col-sm-8" },
+                  React.createElement("input", {
+                    type: "text",
+                    className: "form-control",
+                    placeholder: "Buscar por referencia, cliente o ID...",
+                    value: query,
+                    onChange: (event) => setQuery(event.target.value)
+                  })
+                ),
+                React.createElement("div", { className: "col-12 col-sm" },
+                  React.createElement("button", { type: "submit", className: "btn btn-outline-primary w-100" }, "Buscar")
+                )
+              ),
+              error && React.createElement("div", { className: "alert alert-danger" }, error),
+              React.createElement("div", { className: "table-responsive border rounded flex-grow-1" },
+                React.createElement("table", { className: "table table-sm table-hover align-middle mb-0" },
+                  React.createElement("thead", { className: "table-light" },
+                    React.createElement("tr", null,
+                      React.createElement("th", { scope: "col" }, "ID"),
+                      React.createElement("th", { scope: "col" }, "Fecha"),
+                      React.createElement("th", { scope: "col" }, "Referencia"),
+                      React.createElement("th", { scope: "col" }, "Cliente"),
+                      React.createElement("th", { scope: "col" }, "Email")
+                    )
+                  ),
+                  React.createElement("tbody", null,
+                    loading ? (
+                      React.createElement("tr", null,
+                        React.createElement("td", { colSpan: 5, className: "text-center" }, "Cargando...")
+                      )
+                    ) : rows.length === 0 ? (
+                      React.createElement("tr", null,
+                        React.createElement("td", { colSpan: 5, className: "text-center text-body-secondary" }, "Sin resultados")
+                      )
+                    ) : (
+                      rows.map((row) => {
+                        const isSelected = selectedId && String(selectedId) === String(row.id);
+                        return React.createElement("tr", {
+                          key: `${row.id}-${row.idcotizacionweb}`,
+                          className: isSelected ? "table-primary" : "",
+                          role: "button",
+                          onClick: () => onSelect(row)
+                        },
+                          React.createElement("td", null, row.id),
+                          React.createElement("td", null, formatDate(row.fecha)),
+                          React.createElement("td", null, row.referencia || "—"),
+                          React.createElement("td", null, row.nombrecliente || "—"),
+                          React.createElement("td", null, row.email || "—")
+                        );
+                      })
+                    )
+                  )
+                )
+              ),
+              React.createElement("div", { className: "d-flex justify-content-between align-items-center mt-3" },
+                React.createElement("div", { className: "small text-body-secondary" },
+                  pagination?.total ? `${pagination.total} resultados` : ""
+                ),
+                React.createElement(Pagination, { pagination, onChange: onPageChange })
+              )
+            )
+          )
+        );
+      };
+
+      const CotizacionDetail = ({ cotizacionId, onManualLookup }) => {
+        const [lookupId, setLookupId] = useState("");
+        const [activeId, setActiveId] = useState(cotizacionId ? String(cotizacionId) : "");
+        const [data, setData] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState("");
+
+        useEffect(() => {
+          if (cotizacionId) {
+            setActiveId(String(cotizacionId));
+            setLookupId("");
+          }
+        }, [cotizacionId]);
+
+        useEffect(() => {
+          if (!activeId) {
+            setData(null);
+            setError("");
+            return;
+          }
+          const controller = new AbortController();
+          setLoading(true);
+          setError("");
+          fetchJson(`${API_BASE}/cotizaciones/${encodeURIComponent(activeId)}`, { signal: controller.signal })
+            .then((payload) => {
+              setData(payload.data ?? null);
+            })
+            .catch((err) => {
+              if (err.name === "AbortError") return;
+              setError(err.message ?? "Error inesperado");
+              setData(null);
+            })
+            .finally(() => setLoading(false));
+          return () => controller.abort();
+        }, [activeId]);
+
+        const onSubmit = (event) => {
+          event.preventDefault();
+          const trimmed = lookupId.trim();
+          if (!trimmed) return;
+          setActiveId(trimmed);
+          onManualLookup?.(trimmed);
+        };
+
+        const header = data?.cotizacion;
+        const items = data?.items ?? [];
+        const subtotal = useMemo(() => {
+          return items.reduce((acc, item) => acc + (item.precioventa || 0) * (item.cantidad || 0), 0);
+        }, [items]);
+
+        return (
+          React.createElement("section", { className: "card shadow-sm h-100" },
+            React.createElement("div", { className: "card-body d-flex flex-column" },
+              React.createElement("div", { className: "d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3" },
+                React.createElement("div", null,
+                  React.createElement("h2", { className: "h5 mb-0" }, "Detalle de cotización"),
+                  React.createElement("p", { className: "text-body-secondary small mb-0" }, "Consulta productos y datos del cliente.")
+                )
+              ),
+              React.createElement("form", { className: "row g-2 mb-3", onSubmit },
+                React.createElement("div", { className: "col-12 col-sm-8" },
+                  React.createElement("input", {
+                    type: "text",
+                    className: "form-control",
+                    placeholder: "Buscar por ID o ID WooCommerce...",
+                    value: lookupId,
+                    onChange: (event) => setLookupId(event.target.value)
+                  })
+                ),
+                React.createElement("div", { className: "col-12 col-sm" },
+                  React.createElement("button", { type: "submit", className: "btn btn-outline-secondary w-100" }, "Buscar detalle")
+                )
+              ),
+              error && React.createElement("div", { className: "alert alert-danger" }, error),
+              loading ? (
+                React.createElement("div", { className: "flex-grow-1 d-flex align-items-center justify-content-center" },
+                  React.createElement("div", { className: "text-body-secondary" }, "Cargando...")
+                )
+              ) : header ? (
+                React.createElement(React.Fragment, null,
+                  React.createElement("div", { className: "mb-3" },
+                    React.createElement("div", { className: "row g-2" },
+                      React.createElement("div", { className: "col-12 col-md-6" },
+                        React.createElement("div", { className: "small text-body-secondary" }, "ID"),
+                        React.createElement("div", { className: "fw-semibold" }, header.id)
+                      ),
+                      React.createElement("div", { className: "col-12 col-md-6" },
+                        React.createElement("div", { className: "small text-body-secondary" }, "ID WooCommerce"),
+                        React.createElement("div", { className: "fw-semibold" }, header.idcotizacionweb ?? "—")
+                      ),
+                      React.createElement("div", { className: "col-12 col-md-6" },
+                        React.createElement("div", { className: "small text-body-secondary" }, "Fecha"),
+                        React.createElement("div", { className: "fw-semibold" }, formatDate(header.fecha))
+                      ),
+                      React.createElement("div", { className: "col-12 col-md-6" },
+                        React.createElement("div", { className: "small text-body-secondary" }, "Referencia"),
+                        React.createElement("div", { className: "fw-semibold" }, header.referencia || "—")
+                      ),
+                      React.createElement("div", { className: "col-12 col-md-6" },
+                        React.createElement("div", { className: "small text-body-secondary" }, "Cliente"),
+                        React.createElement("div", { className: "fw-semibold" }, header.nombrecliente || "—")
+                      ),
+                      React.createElement("div", { className: "col-12 col-md-6" },
+                        React.createElement("div", { className: "small text-body-secondary" }, "Teléfonos"),
+                        React.createElement("div", { className: "fw-semibold" }, header.telefonos || "—")
+                      ),
+                      React.createElement("div", { className: "col-12" },
+                        React.createElement("div", { className: "small text-body-secondary" }, "Correo"),
+                        React.createElement("div", { className: "fw-semibold" }, header.email || "—")
+                      )
+                    )
+                  ),
+                  React.createElement("div", { className: "table-responsive border rounded" },
+                    React.createElement("table", { className: "table table-sm table-hover align-middle mb-0" },
+                      React.createElement("thead", { className: "table-light" },
+                        React.createElement("tr", null,
+                          React.createElement("th", { scope: "col" }, "SKU"),
+                          React.createElement("th", { scope: "col" }, "Producto"),
+                          React.createElement("th", { scope: "col", className: "text-end" }, "Cantidad"),
+                          React.createElement("th", { scope: "col", className: "text-end" }, "Precio"),
+                          React.createElement("th", { scope: "col", className: "text-end" }, "Descuento %"),
+                          React.createElement("th", { scope: "col", className: "text-end" }, "IVA %"),
+                          React.createElement("th", { scope: "col" }, "Detalle")
+                        )
+                      ),
+                      React.createElement("tbody", null,
+                        items.length === 0 ? (
+                          React.createElement("tr", null,
+                            React.createElement("td", { colSpan: 7, className: "text-center text-body-secondary" }, "Sin productos asociados")
+                          )
+                        ) : (
+                          items.map((item) => (
+                            React.createElement("tr", { key: item.id },
+                              React.createElement("td", null, item.sku || "—"),
+                              React.createElement("td", null, item.nombre_producto || item.nombre || "—"),
+                              React.createElement("td", { className: "text-end" }, formatNumber(item.cantidad)),
+                              React.createElement("td", { className: "text-end" }, formatCurrency(item.precioventa || 0)),
+                              React.createElement("td", { className: "text-end" }, formatNumber(item.porcentajedescuento || 0)),
+                              React.createElement("td", { className: "text-end" }, formatNumber(item.iva || 0)),
+                              React.createElement("td", null, item.detalle || "—")
+                            )
+                          ))
+                        )
+                      )
+                    )
+                  ),
+                  React.createElement("div", { className: "d-flex justify-content-between align-items-center mt-3" },
+                    React.createElement("div", { className: "fw-semibold" }, `Subtotal estimado: ${formatCurrency(subtotal)}`),
+                    React.createElement("div", { className: "text-body-secondary small" }, `${items.length} productos`)
+                  )
+                )
+              ) : (
+                React.createElement("div", { className: "flex-grow-1 d-flex align-items-center justify-content-center text-body-secondary text-center px-3" },
+                  "Selecciona una cotización o busca por número para ver el detalle."
+                )
+              )
+            )
+          )
+        );
+      };
+
+      const App = () => {
+        const [selected, setSelected] = useState(null);
+
+        const handleSelect = (row) => {
+          setSelected({
+            id: row.id,
+            idcotizacionweb: row.idcotizacionweb
+          });
+        };
+
+        const handleManualLookup = (value) => {
+          setSelected({ id: value, idcotizacionweb: value });
+        };
+
+        return (
+          React.createElement("div", { className: "container py-4" },
+            React.createElement("header", { className: "mb-4" },
+              React.createElement("h1", { className: "display-6 fw-bold" }, "Panel de cotizaciones"),
+              React.createElement("p", { className: "lead" }, "Explora los SKUs y las cotizaciones registradas en la base de datos." )
+            ),
+            React.createElement("div", { className: "row g-4" },
+              React.createElement("div", { className: "col-12" },
+                React.createElement(SkuSearch, null)
+              ),
+              React.createElement("div", { className: "col-12 col-xl-6" },
+                React.createElement(CotizacionesList, {
+                  onSelect: handleSelect,
+                  selectedId: selected?.id ?? null
+                })
+              ),
+              React.createElement("div", { className: "col-12 col-xl-6" },
+                React.createElement(CotizacionDetail, {
+                  cotizacionId: selected?.id ?? "",
+                  onManualLookup: handleManualLookup
+                })
+              )
+            )
+          )
+        );
+      };
+
+      const root = createRoot(document.getElementById("root"));
+      root.render(React.createElement(App));
     </script>
   </body>
 </html>
