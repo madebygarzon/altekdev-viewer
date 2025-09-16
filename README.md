@@ -299,5 +299,5 @@ La interfaz usa Bootstrap 5 y React 18 cargado desde CDN mediante módulos ES, p
 ## ✍️ Autor
 
 - Desarrollado por **Carlos Garzón**  
-- Software Engineer Fullstack Web Developer.
+- Software Engineer, Fullstack Web Developer.
 ---
