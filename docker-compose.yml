@@ -1,0 +1,14 @@
+version: "3.9"
+services:
+  altekdev-api:
+    image: node:20
+    working_dir: /app
+    command: bash -lc "npm i && npm run dev"
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - ALLOWED_ORIGIN=${ALLOWED_ORIGIN}
+      - PORT=8080
+    volumes:
+      - .:/app

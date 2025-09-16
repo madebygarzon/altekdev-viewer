@@ -1,0 +1,56 @@
+<!-- Comments in English inside code as requested. -->
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>ALTEKDev Viewer</title></head>
+  <body>
+    <h1>ALTEKDev Viewer</h1>
+    <button id="ping">Ping</button>
+    <button id="tables">Tables</button>
+    <input id="q" placeholder="Search SKU...">
+    <button id="items">inv_items</button>
+
+    <h3>Insert test</h3>
+    <form id="ins">
+      <input name="cotizacionweb" type="number" placeholder="idcotizacionweb" required>
+      <input name="cliente" placeholder="cliente" required>
+      <input name="telefono" placeholder="telefono">
+      <input name="email" type="email" placeholder="email" required>
+      <input name="sku" placeholder="SKU exacto" required>
+      <input name="nombre" placeholder="Nombre item" required>
+      <input name="cantidad" type="number" value="1" min="1" required>
+      <input name="precio" type="number" step="0.01" placeholder="Precio" required>
+      <input name="descuento" type="number" min="0" max="100" value="0">
+      <button type="submit">Probar inserción</button>
+    </form>
+
+    <pre id="out"></pre>
+
+    <script>
+      const API = "http://localhost:8080/api";
+      const out = document.getElementById("out");
+
+      document.getElementById("ping").onclick = async () => {
+        out.textContent = JSON.stringify(await (await fetch(`${API}/ping`)).json(), null, 2);
+      };
+      document.getElementById("tables").onclick = async () => {
+        out.textContent = JSON.stringify(await (await fetch(`${API}/tables`)).json(), null, 2);
+      };
+      document.getElementById("items").onclick = async () => {
+        const q = document.getElementById("q").value;
+        const url = q ? `${API}/inv-items?search=${encodeURIComponent(q)}` : `${API}/inv-items`;
+        out.textContent = JSON.stringify(await (await fetch(url)).json(), null, 2);
+      };
+      document.getElementById("ins").onsubmit = async (e) => {
+        e.preventDefault();
+        const form = new FormData(e.target);
+        const body = Object.fromEntries(form.entries());
+        body.cantidad = Number(body.cantidad);
+        body.precio = Number(body.precio);
+        body.descuento = Number(body.descuento);
+        body.cotizacionweb = Number(body.cotizacionweb);
+        const r = await fetch(`${API}/test-insert`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+        out.textContent = JSON.stringify(await r.json(), null, 2);
+      };
+    </script>
+  </body>
+</html>

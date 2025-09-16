@@ -1,0 +1,22 @@
+{
+  "name": "altekdev-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server/index.ts",
+    "start": "node dist/server/index.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4"
+  }
+}
