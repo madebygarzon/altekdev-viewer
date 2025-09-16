@@ -22,6 +22,11 @@
       .table-responsive {
         max-height: 420px;
       }
+      .nav-tabs .nav-link.active {
+        background: #f8f9fa;
+        border-bottom: 2px solid #0d6efd;
+        font-weight: 600;
+      }
     </style>
   </head>
   <body>
@@ -776,56 +781,70 @@
       };
 
       const App = () => {
-        const [selectedSku, setSelectedSku] = useState("");
-        const [selected, setSelected] = useState(null);
+  const [tab, setTab] = useState("sku");
+  const [selectedSku, setSelectedSku] = useState("");
+  const [selected, setSelected] = useState(null);
 
-        const handleSkuSelect = (sku) => {
-          setSelectedSku(sku ?? "");
-        };
+  const handleSkuSelect = (sku) => setSelectedSku(sku ?? "");
+  const handleSelect = (row) => setSelected({ id: row.id, idcotizacionweb: row.idcotizacionweb });
+  const handleManualLookup = (value) => setSelected({ id: value, idcotizacionweb: value });
 
-        const handleSelect = (row) => {
-          setSelected({
-            id: row.id,
-            idcotizacionweb: row.idcotizacionweb
-          });
-        };
-
-        const handleManualLookup = (value) => {
-          setSelected({ id: value, idcotizacionweb: value });
-        };
-
-        return (
-          React.createElement("div", { className: "container py-4" },
-            React.createElement("header", { className: "mb-4" },
-              React.createElement("h1", { className: "display-6 fw-bold" }, "Panel de cotizaciones"),
-              React.createElement("p", { className: "lead" }, "Explora los SKUs y las cotizaciones registradas en la base de datos." )
+  return (
+    React.createElement("div", { className: "container py-4" },
+      React.createElement("header", { className: "mb-4" },
+        React.createElement("h1", { className: "display-6 fw-bold" }, "Panel de datos ALTEK"),
+        /*React.createElement("p", { className: "lead" }, "Explorar los SKUs y las cotizaciones registradas en la base de datos." )*/
+      ),
+      React.createElement("ul", { className: "nav nav-tabs mb-4" },
+        React.createElement("li", { className: "nav-item" },
+          React.createElement("button", {
+            className: "nav-link" + (tab === "sku" ? " active" : ""),
+            type: "button",
+            onClick: () => setTab("sku")
+          }, "Gestión de SKUs")
+        ),
+        React.createElement("li", { className: "nav-item" },
+          React.createElement("button", {
+            className: "nav-link" + (tab === "cot" ? " active" : ""),
+            type: "button",
+            onClick: () => setTab("cot")
+          }, "Cotizaciones")
+        )
+      ),
+      React.createElement("div", null,
+        tab === "sku" ? (
+          React.createElement("div", { className: "row g-4" },
+            React.createElement("div", { className: "col-12 col-xl-6" },
+              React.createElement(SkuSearch, {
+                onSelect: handleSkuSelect,
+                selectedSku
+              })
             ),
-            React.createElement("div", { className: "row g-4" },
-              React.createElement("div", { className: "col-12 col-xl-6" },
-                React.createElement(SkuSearch, {
-                  onSelect: handleSkuSelect,
-                  selectedSku
-                })
-              ),
-              React.createElement("div", { className: "col-12 col-xl-6" },
-                React.createElement(SkuDetail, { sku: selectedSku })
-              ),
-              React.createElement("div", { className: "col-12 col-xl-6" },
-                React.createElement(CotizacionesList, {
-                  onSelect: handleSelect,
-                  selectedId: selected?.id ?? null
-                })
-              ),
-              React.createElement("div", { className: "col-12 col-xl-6" },
-                React.createElement(CotizacionDetail, {
-                  cotizacionId: selected?.id ?? "",
-                  onManualLookup: handleManualLookup
-                })
-              )
+            React.createElement("div", { className: "col-12 col-xl-6" },
+              React.createElement(SkuDetail, { sku: selectedSku })
             )
           )
-        );
-      };
+        ) : (
+          React.createElement("div", { className: "row g-4" },
+            React.createElement("div", { className: "col-12 col-xl-6" },
+              React.createElement(CotizacionesList, {
+                onSelect: handleSelect,
+                selectedId: selected?.id ?? null
+              })
+            ),
+            React.createElement("div", { className: "col-12 col-xl-6" },
+              React.createElement(CotizacionDetail, {
+                cotizacionId: selected?.id ?? "",
+                onManualLookup: handleManualLookup
+              })
+            )
+          )
+        )
+      )
+    )
+  );
+};
+
 
       const root = createRoot(document.getElementById("root"));
       root.render(React.createElement(App));
