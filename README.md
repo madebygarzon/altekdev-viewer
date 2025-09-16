@@ -294,3 +294,10 @@ La interfaz usa Bootstrap 5 y React 18 cargado desde CDN mediante módulos ES, p
 ---
 
 ¿Necesitas ampliar la funcionalidad? Revisa `src/server/routes.ts` para extender el API y `src/web/index.html` para adaptar la interfaz.
+
+---
+## ✍️ Autor
+
+- Desarrollado por **Carlos Garzón**  
+- Software Engineer Fullstack Web Developer.
+---
