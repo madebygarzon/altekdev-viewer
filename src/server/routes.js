@@ -3,6 +3,214 @@ import { z } from "zod";
 import { Router } from "express";
 import { pool } from "./db.js";
 export const router = Router();
+/** Shared helpers */
+const allowedSchemas = (process.env.ALLOWED_SCHEMAS ?? "public")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+if (allowedSchemas.length === 0) {
+    allowedSchemas.push("public");
+}
+const defaultSchema = allowedSchemas[0];
+const SchemaParam = z.enum(allowedSchemas);
+const basePaginationSchema = z.object({
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+    schema: SchemaParam.optional()
+});
+const skuQuerySchema = basePaginationSchema.extend({
+    search: z
+        .string()
+        .trim()
+        .max(100)
+        .optional()
+        .transform(value => (value && value.length > 0 ? value : undefined))
+});
+const cotizacionesQuerySchema = basePaginationSchema.extend({
+    search: z
+        .string()
+        .trim()
+        .max(120)
+        .optional()
+        .transform(value => (value && value.length > 0 ? value : undefined))
+});
+const cotizacionDetailQuerySchema = z.object({
+    schema: SchemaParam.optional()
+});
+const cotizacionDetailParamsSchema = z.object({
+    id: z.string().trim().min(1)
+});
+/** GET /api/skus?search=&page=&pageSize= */
+router.get("/skus", async (req, res) => {
+    const parsed = skuQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+        return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+    }
+    const { search, page, pageSize, schema } = parsed.data;
+    const schemaName = schema ?? defaultSchema;
+    try {
+        const params = [];
+        const conditions = [];
+        if (search) {
+            params.push(`%${search}%`);
+            conditions.push(`item ILIKE $${params.length}`);
+        }
+        const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+        const countQuery = `SELECT COUNT(*)::bigint AS total FROM "${schemaName}"."inv_items" ${where}`;
+        const countResult = await pool.query(countQuery, params);
+        const total = Number(countResult.rows[0]?.total ?? 0);
+        const limitPlaceholder = params.length + 1;
+        const offsetPlaceholder = params.length + 2;
+        const dataQuery = `SELECT item FROM "${schemaName}"."inv_items" ${where} ORDER BY item ASC LIMIT $${limitPlaceholder} OFFSET $${offsetPlaceholder}`;
+        const listParams = [...params, pageSize, (page - 1) * pageSize];
+        const listResult = await pool.query(dataQuery, listParams);
+        res.json({
+            data: listResult.rows.map(row => ({ item: row.item })),
+            pagination: {
+                page,
+                pageSize,
+                total,
+                totalPages: Math.max(1, Math.ceil(total / pageSize))
+            }
+        });
+    }
+    catch (error) {
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+/** GET /api/cotizaciones */
+router.get("/cotizaciones", async (req, res) => {
+    const parsed = cotizacionesQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+        return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+    }
+    const { search, page, pageSize, schema } = parsed.data;
+    const schemaName = schema ?? defaultSchema;
+    try {
+        const params = [];
+        const addParam = (value) => {
+            params.push(value);
+            return `$${params.length}`;
+        };
+        const conditions = [];
+        if (search) {
+            const like = `%${search}%`;
+            const clauseParts = [
+                `c.referencia ILIKE ${addParam(like)}`,
+                `c.nombrecliente ILIKE ${addParam(like)}`,
+                `c.email ILIKE ${addParam(like)}`
+            ];
+            const numeric = Number(search);
+            if (Number.isInteger(numeric)) {
+                clauseParts.push(`c.id = ${addParam(numeric)}`);
+            }
+            clauseParts.push(`CAST(c.idcotizacionweb AS TEXT) ILIKE ${addParam(like)}`);
+            conditions.push(`(${clauseParts.join(" OR ")})`);
+        }
+        const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+        const countQuery = `SELECT COUNT(*)::bigint AS total FROM "${schemaName}"."cotizaciones" c ${where}`;
+        const countResult = await pool.query(countQuery, params);
+        const total = Number(countResult.rows[0]?.total ?? 0);
+        const limitPlaceholder = params.length + 1;
+        const offsetPlaceholder = params.length + 2;
+        const dataQuery = `SELECT c.id, c.fecha, c.referencia, c.nombrecliente, c.email, c.idcotizacionweb
+      FROM "${schemaName}"."cotizaciones" c
+      ${where}
+      ORDER BY c.fecha DESC, c.id DESC
+      LIMIT $${limitPlaceholder} OFFSET $${offsetPlaceholder}`;
+        const listParams = [...params, pageSize, (page - 1) * pageSize];
+        const listResult = await pool.query(dataQuery, listParams);
+        res.json({
+            data: listResult.rows.map(row => ({
+                id: Number(row.id),
+                fecha: row.fecha,
+                referencia: row.referencia,
+                nombrecliente: row.nombrecliente,
+                email: row.email,
+                idcotizacionweb: row.idcotizacionweb
+            })),
+            pagination: {
+                page,
+                pageSize,
+                total,
+                totalPages: Math.max(1, Math.ceil(total / pageSize))
+            }
+        });
+    }
+    catch (error) {
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+/** GET /api/cotizaciones/:id */
+router.get("/cotizaciones/:id", async (req, res) => {
+    const paramsResult = cotizacionDetailParamsSchema.safeParse(req.params);
+    const queryResult = cotizacionDetailQuerySchema.safeParse(req.query);
+    if (!paramsResult.success || !queryResult.success) {
+        const error = !paramsResult.success ? paramsResult.error : queryResult.error;
+        return res.status(400).json({ ok: false, error: error.flatten() });
+    }
+    const rawId = paramsResult.data.id;
+    const schemaName = queryResult.data.schema ?? defaultSchema;
+    try {
+        const conditions = [];
+        const values = [];
+        const addValue = (value) => {
+            values.push(value);
+            return `$${values.length}`;
+        };
+        const numericId = Number(rawId);
+        if (Number.isInteger(numericId)) {
+            conditions.push(`c.id = ${addValue(numericId)}`);
+        }
+        conditions.push(`CAST(c.idcotizacionweb AS TEXT) = ${addValue(rawId)}`);
+        const whereClause = conditions.length > 0 ? conditions.join(" OR ") : "FALSE";
+        const headerQuery = `SELECT c.id, c.fecha, c.referencia, c.nombrecliente, c.email, c.telefonos, c.idcotizacionweb
+      FROM "${schemaName}"."cotizaciones" c
+      WHERE ${whereClause}
+      ORDER BY c.fecha DESC
+      LIMIT 1`;
+        const headerResult = await pool.query(headerQuery, values);
+        if (headerResult.rowCount === 0) {
+            return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
+        }
+        const cotizacion = headerResult.rows[0];
+        const itemsQuery = `SELECT ixc.id, ixc.iditem, ixc.nombre, ixc.cantidad, ixc.precioventa, ixc.porcentajedescuento, ixc.iva, ixc.detalle,
+        ii.item AS sku, ii.nombre AS nombre_producto
+      FROM "${schemaName}"."itemsxcotizacion" ixc
+      LEFT JOIN "${schemaName}"."inv_items" ii ON ii.id = ixc.iditem
+      WHERE ixc.idcotizacion = $1
+      ORDER BY ixc.id ASC`;
+        const itemsResult = await pool.query(itemsQuery, [Number(cotizacion.id)]);
+        res.json({
+            data: {
+                cotizacion: {
+                    id: Number(cotizacion.id),
+                    fecha: cotizacion.fecha,
+                    referencia: cotizacion.referencia,
+                    nombrecliente: cotizacion.nombrecliente,
+                    email: cotizacion.email,
+                    telefonos: cotizacion.telefonos,
+                    idcotizacionweb: cotizacion.idcotizacionweb
+                },
+                items: itemsResult.rows.map(row => ({
+                    id: Number(row.id),
+                    iditem: row.iditem ? Number(row.iditem) : null,
+                    nombre: row.nombre,
+                    cantidad: Number(row.cantidad),
+                    precioventa: Number(row.precioventa),
+                    porcentajedescuento: Number(row.porcentajedescuento),
+                    iva: Number(row.iva),
+                    detalle: row.detalle,
+                    sku: row.sku ?? null,
+                    nombre_producto: row.nombre_producto ?? null
+                }))
+            }
+        });
+    }
+    catch (error) {
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
 /** ...deja intactos tus endpoints existentes... */
 /** Orders payload schema (WooCommerce-like) */
 const OrderItem = z.object({
@@ -13,8 +221,8 @@ const OrderItem = z.object({
     discount: z.number().min(0).max(100).default(0)
 });
 const OrderBody = z.object({
-    schema: z.string().default("public"), // "public" | "prev"
-    order_id: z.number().int().positive(), // idcotizacionweb (id de Woo)
+    schema: SchemaParam.default(defaultSchema),
+    order_id: z.number().int().positive(),
     customer: z.object({
         name: z.string().min(1),
         phone: z.string().optional().default(""),
