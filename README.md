@@ -1,5 +1,13 @@
 # ALTEKDev Viewer
 
+**Autor:** Ing. Carlos Garzón
+**Versión:** 1.0.0
+**Licencia:** GPLv2
+
+---
+
+## 📌 Descripción
+
 ALTEKDev Viewer es una herramienta web full-stack que centraliza la consulta de SKUs e históricas de cotizaciones almacenadas en una base de datos PostgreSQL. El proyecto expone un API REST en Node.js/Express y sirve una interfaz React ligera (sin build tools) que permite buscar productos, revisar su ficha detallada y navegar cotizaciones con sus ítems. También ofrece un endpoint para registrar nuevas cotizaciones provenientes de WooCommerce (u otra fuente externa).
 
 ## Tabla de contenido
