@@ -111,7 +111,7 @@
         )
       );
 
-      const SkuSearch = () => {
+      const SkuSearch = ({ onSelect, selectedSku }) => {
         const [query, setQuery] = useState("");
         const [submittedQuery, setSubmittedQuery] = useState("");
         const [page, setPage] = useState(1);
@@ -120,6 +120,8 @@
         const [pagination, setPagination] = useState(null);
         const [loading, setLoading] = useState(false);
         const [error, setError] = useState("");
+
+        const normalizedSelected = selectedSku ? String(selectedSku).toUpperCase() : "";
 
         useEffect(() => {
           const controller = new AbortController();
@@ -162,13 +164,25 @@
           setPageSize(value);
         };
 
+        const handleRowSelect = (sku) => {
+          if (!sku) return;
+          onSelect?.(sku);
+        };
+
+        const handleRowKeyDown = (event, sku) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            handleRowSelect(sku);
+          }
+        };
+
         return (
-          React.createElement("section", { className: "card shadow-sm" },
-            React.createElement("div", { className: "card-body" },
+          React.createElement("section", { className: "card shadow-sm h-100" },
+            React.createElement("div", { className: "card-body d-flex flex-column" },
               React.createElement("div", { className: "d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3" },
                 React.createElement("div", null,
                   React.createElement("h2", { className: "h5 mb-0" }, "Buscar SKUs"),
-                  React.createElement("p", { className: "text-body-secondary small mb-0" }, "Consulta productos por código SKU." )
+                  React.createElement("p", { className: "text-body-secondary small mb-0" }, "Consulta productos por código SKU y haz clic en cualquier resultado para ver el detalle." )
                 ),
                 React.createElement("div", { className: "d-flex align-items-center gap-2" },
                   React.createElement("label", { className: "small text-body-secondary" }, "Filas:"),
@@ -190,7 +204,7 @@
                 )
               ),
               error && React.createElement("div", { className: "alert alert-danger" }, error),
-              React.createElement("div", { className: "table-responsive border rounded" },
+              React.createElement("div", { className: "table-responsive border rounded flex-grow-1" },
                 React.createElement("table", { className: "table table-sm table-hover align-middle mb-0" },
                   React.createElement("thead", { className: "table-light" },
                     React.createElement("tr", null,
@@ -207,11 +221,21 @@
                         React.createElement("td", { className: "text-center text-body-secondary" }, "Sin resultados")
                       )
                     ) : (
-                      items.map((item) => (
-                        React.createElement("tr", { key: item.item },
-                          React.createElement("td", null, item.item)
-                        )
-                      ))
+                      items.map((item) => {
+                        const skuValue = item.item;
+                        const isSelected = normalizedSelected && normalizedSelected === String(skuValue).toUpperCase();
+                        return React.createElement("tr", {
+                          key: skuValue,
+                          className: isSelected ? "table-primary" : "",
+                          role: "button",
+                          tabIndex: 0,
+                          style: { cursor: "pointer" },
+                          onClick: () => handleRowSelect(skuValue),
+                          onKeyDown: (event) => handleRowKeyDown(event, skuValue)
+                        },
+                          React.createElement("td", { className: "fw-semibold" }, skuValue)
+                        );
+                      })
                     )
                   )
                 )
@@ -222,6 +246,242 @@
                 ),
                 React.createElement(Pagination, { pagination, onChange: onPageChange })
               )
+            )
+          )
+      );
+    };
+
+      const SkuDetail = ({ sku }) => {
+        const [data, setData] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState("");
+
+        useEffect(() => {
+          if (!sku) {
+            setData(null);
+            setError("");
+            setLoading(false);
+            return;
+          }
+          const controller = new AbortController();
+          setLoading(true);
+          setError("");
+          fetchJson(`${API_BASE}/sku/${encodeURIComponent(sku)}`, { signal: controller.signal })
+            .then((payload) => {
+              setData(payload.data ?? null);
+            })
+            .catch((err) => {
+              if (err.name === "AbortError") return;
+              setError(err.message ?? "Error inesperado");
+              setData(null);
+            })
+            .finally(() => setLoading(false));
+          return () => controller.abort();
+        }, [sku]);
+
+        const imageUrl = useMemo(() => {
+          if (!data) return "";
+          const candidates = ["imagen", "imagenurl", "urlimagen", "imagenprincipal"];
+          for (const key of candidates) {
+            const value = data[key];
+            if (typeof value === "string" && value.trim() !== "") {
+              return value;
+            }
+          }
+          return "";
+        }, [data]);
+
+        const highlightConfig = useMemo(() => ([
+          { key: "item", label: "SKU" },
+          { key: "nombre", label: "Nombre" },
+          { key: "nombreweb", label: "Nombre web" },
+          { key: "existencia", label: "Existencia", type: "number" },
+          { key: "existencias", label: "Existencias", type: "number" },
+          { key: "costoestandar", label: "Costo estándar", type: "currency" },
+          { key: "costopromedio", label: "Costo promedio", type: "currency" },
+          { key: "costoultimacompra", label: "Costo última compra", type: "currency" }
+        ]), []);
+
+        const essentialHighlightKeys = useMemo(() => new Set(["item", "nombre", "nombreweb"]), []);
+
+        const formatFieldValue = (key, value, type = "text") => {
+          if (value === null || value === undefined || value === "") {
+            return "—";
+          }
+          if (typeof value === "boolean") {
+            return value ? "Sí" : "No";
+          }
+          if (type === "currency") {
+            const numericValue = Number(value);
+            if (!Number.isNaN(numericValue)) {
+              return formatCurrency(numericValue);
+            }
+          }
+          if (type === "number") {
+            const numericValue = Number(value);
+            if (!Number.isNaN(numericValue)) {
+              return formatNumber(numericValue);
+            }
+          }
+          if (value instanceof Date) {
+            return value.toLocaleString("es-CO");
+          }
+          return String(value);
+        };
+
+        const isCurrencyKey = (key) => {
+          const lower = key.toLowerCase();
+          return lower.includes("costo") || lower.includes("precio") || lower.includes("valor");
+        };
+
+        const isNumericKey = (key) => {
+          const lower = key.toLowerCase();
+          return lower.includes("existencia") || lower.includes("stock") || lower.includes("cantidad") || lower.includes("peso");
+        };
+
+        const numericPattern = /^-?\d+(?:\.\d+)?$/;
+
+        const formatGenericValue = (key, value) => {
+          if (value === null || value === undefined || value === "") {
+            return "—";
+          }
+          if (typeof value === "boolean") {
+            return value ? "Sí" : "No";
+          }
+          if (typeof value === "number") {
+            return isCurrencyKey(key) ? formatCurrency(value) : formatNumber(value);
+          }
+          if (typeof value === "bigint") {
+            return value.toString();
+          }
+          if (typeof value === "string") {
+            const trimmed = value.trim();
+            if (trimmed === "") {
+              return "—";
+            }
+            if (numericPattern.test(trimmed)) {
+              const numericValue = Number(trimmed);
+              if (!Number.isNaN(numericValue)) {
+                if (isCurrencyKey(key)) {
+                  return formatCurrency(numericValue);
+                }
+                if (isNumericKey(key)) {
+                  return formatNumber(numericValue);
+                }
+              }
+            }
+            return trimmed;
+          }
+          try {
+            return JSON.stringify(value);
+          } catch (_err) {
+            return String(value);
+          }
+        };
+
+        const highlightEntries = useMemo(() => {
+          const entries = highlightConfig.map((field) => ({
+            ...field,
+            value: data ? data[field.key] : undefined
+          }));
+          const hasExistencia = entries.some((entry) => entry.key === "existencia" && entry.value !== undefined && entry.value !== null && entry.value !== "");
+          return entries.filter((entry) => {
+            if (hasExistencia && entry.key === "existencias") {
+              return false;
+            }
+            if (essentialHighlightKeys.has(entry.key)) {
+              return true;
+            }
+            return entry.value !== undefined && entry.value !== null && entry.value !== "";
+          });
+        }, [data, highlightConfig, essentialHighlightKeys]);
+
+        const excludedKeys = useMemo(() => {
+          const keys = new Set(highlightEntries.map((entry) => entry.key));
+          ["imagen", "imagenurl", "urlimagen", "imagenprincipal"].forEach((key) => keys.add(key));
+          return keys;
+        }, [highlightEntries]);
+
+        const extraEntries = useMemo(() => {
+          if (!data) return [];
+          return Object.entries(data)
+            .filter(([key, value]) => {
+              if (excludedKeys.has(key)) {
+                return false;
+              }
+              if (value === null || value === undefined) {
+                return false;
+              }
+              if (typeof value === "string" && value.trim() === "") {
+                return false;
+              }
+              return true;
+            })
+            .sort((a, b) => a[0].localeCompare(b[0]));
+        }, [data, excludedKeys]);
+
+        let content = null;
+        if (!sku) {
+          content = React.createElement("div", { className: "flex-grow-1 d-flex align-items-center justify-content-center text-body-secondary text-center px-3" },
+            "Selecciona un SKU de la tabla para ver el detalle."
+          );
+        } else if (loading) {
+          content = React.createElement("div", { className: "flex-grow-1 d-flex align-items-center justify-content-center" },
+            React.createElement("div", { className: "text-body-secondary" }, "Cargando detalle...")
+          );
+        } else if (data) {
+          content = React.createElement(React.Fragment, null,
+            imageUrl ? React.createElement("div", { className: "mb-3 text-center" },
+              React.createElement("img", {
+                src: imageUrl,
+                alt: data?.nombre ? `Imagen de ${data.nombre}` : `Imagen del SKU ${sku}`,
+                className: "img-fluid rounded border",
+                style: { maxHeight: "220px", objectFit: "contain" }
+              })
+            ) : null,
+            React.createElement("div", { className: "row g-3" },
+              highlightEntries.map((field) => (
+                React.createElement("div", { key: field.key, className: "col-12 col-md-6" },
+                  React.createElement("div", { className: "small text-body-secondary" }, field.label),
+                  React.createElement("div", { className: "fw-semibold" }, formatFieldValue(field.key, field.value, field.type))
+                )
+              ))
+            ),
+            extraEntries.length > 0 ? (
+              React.createElement("div", { className: "table-responsive border rounded mt-3" },
+                React.createElement("table", { className: "table table-sm align-middle mb-0" },
+                  React.createElement("tbody", null,
+                    extraEntries.map(([key, value]) => (
+                      React.createElement("tr", { key },
+                        React.createElement("th", { scope: "row", className: "text-nowrap" }, key),
+                        React.createElement("td", null, formatGenericValue(key, value))
+                      )
+                    ))
+                  )
+                )
+              )
+            ) : (
+              React.createElement("div", { className: "text-body-secondary small mt-3" }, "No hay más campos para mostrar.")
+            )
+          );
+        } else {
+          content = React.createElement("div", { className: "flex-grow-1 d-flex align-items-center justify-content-center text-body-secondary text-center px-3" },
+            error ? "No se pudo cargar el detalle del SKU." : "No se encontraron datos para el SKU seleccionado."
+          );
+        }
+
+        return (
+          React.createElement("section", { className: "card shadow-sm h-100" },
+            React.createElement("div", { className: "card-body d-flex flex-column" },
+              React.createElement("div", { className: "d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3" },
+                React.createElement("div", null,
+                  React.createElement("h2", { className: "h5 mb-0" }, "Detalle del producto"),
+                  React.createElement("p", { className: "text-body-secondary small mb-0" }, "Consulta la información completa del SKU seleccionado.")
+                ),
+                sku ? React.createElement("span", { className: "badge text-bg-secondary align-self-center" }, sku) : null
+              ),
+              error && sku ? React.createElement("div", { className: "alert alert-danger" }, error) : null,
+              content
             )
           )
         );
@@ -516,7 +776,12 @@
       };
 
       const App = () => {
+        const [selectedSku, setSelectedSku] = useState("");
         const [selected, setSelected] = useState(null);
+
+        const handleSkuSelect = (sku) => {
+          setSelectedSku(sku ?? "");
+        };
 
         const handleSelect = (row) => {
           setSelected({
@@ -536,8 +801,14 @@
               React.createElement("p", { className: "lead" }, "Explora los SKUs y las cotizaciones registradas en la base de datos." )
             ),
             React.createElement("div", { className: "row g-4" },
-              React.createElement("div", { className: "col-12" },
-                React.createElement(SkuSearch, null)
+              React.createElement("div", { className: "col-12 col-xl-6" },
+                React.createElement(SkuSearch, {
+                  onSelect: handleSkuSelect,
+                  selectedSku
+                })
+              ),
+              React.createElement("div", { className: "col-12 col-xl-6" },
+                React.createElement(SkuDetail, { sku: selectedSku })
               ),
               React.createElement("div", { className: "col-12 col-xl-6" },
                 React.createElement(CotizacionesList, {

@@ -26,6 +26,18 @@ const skuQuerySchema = basePaginationSchema.extend({
         .optional()
         .transform(value => (value && value.length > 0 ? value : undefined))
 });
+const skuDetailParamsSchema = z.object({
+    sku: z
+        .string()
+        .trim()
+        .min(1)
+        .max(64)
+        .regex(/^[A-Za-z0-9_\-\.\/ ]+$/, "SKU inválido")
+        .transform(value => value.toUpperCase())
+});
+const skuDetailQuerySchema = z.object({
+    schema: SchemaParam.optional()
+});
 const cotizacionesQuerySchema = basePaginationSchema.extend({
     search: z
         .string()
@@ -73,6 +85,28 @@ router.get("/skus", async (req, res) => {
                 totalPages: Math.max(1, Math.ceil(total / pageSize))
             }
         });
+    }
+    catch (error) {
+        res.status(500).json({ ok: false, error: error.message });
+    }
+});
+/** GET /api/sku/:sku */
+router.get("/sku/:sku", async (req, res) => {
+    const paramsResult = skuDetailParamsSchema.safeParse(req.params);
+    const queryResult = skuDetailQuerySchema.safeParse(req.query);
+    if (!paramsResult.success || !queryResult.success) {
+        const error = !paramsResult.success ? paramsResult.error : queryResult.error;
+        return res.status(400).json({ ok: false, error: error.flatten() });
+    }
+    const sku = paramsResult.data.sku;
+    const schemaName = queryResult.data.schema ?? defaultSchema;
+    try {
+        const detailQuery = `SELECT * FROM "${schemaName}"."inv_items" WHERE UPPER(item) = $1 LIMIT 1`;
+        const result = await pool.query(detailQuery, [sku]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ ok: false, error: "SKU no encontrado" });
+        }
+        res.json({ data: result.rows[0] });
     }
     catch (error) {
         res.status(500).json({ ok: false, error: error.message });
